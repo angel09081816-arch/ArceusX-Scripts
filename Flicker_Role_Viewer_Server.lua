@@ -1,6 +1,6 @@
 -- Flicker Role Viewer server helper
 -- Place this in ServerScriptService.
--- It exposes a remote snapshot of player role/journal-like values to the client.
+-- It exposes a safe snapshot of role / journal-like values to the client.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -10,18 +10,18 @@ local function normalizeValue(value)
         return ""
     end
 
-    if typeof(value) == "Instance" then
+    local valueType = typeof(value)
+    if valueType == "Instance" then
         if value:IsA("StringValue") or value:IsA("IntValue") or value:IsA("NumberValue") or value:IsA("BoolValue") then
             return tostring(value.Value)
         end
-
         if value:IsA("Folder") or value:IsA("Model") then
             return value.Name
         end
         return value.Name
     end
 
-    if typeof(value) == "string" or typeof(value) == "number" or typeof(value) == "boolean" then
+    if valueType == "string" or valueType == "number" or valueType == "boolean" then
         return tostring(value)
     end
 
@@ -40,6 +40,26 @@ local function isRoleLikeName(name)
         or string.find(lower, "group")
         or string.find(lower, "journal")
         or string.find(lower, "diary")
+        or string.find(lower, "notes")
+end
+
+local function classifyName(name)
+    local lower = string.lower(name or "")
+    if string.find(lower, "journal") or string.find(lower, "diary") or string.find(lower, "notes") then
+        return "journal"
+    end
+    return "role"
+end
+
+local function addEntry(list, category, name, value)
+    if value == nil then
+        return
+    end
+
+    local text = normalizeValue(value)
+    if text ~= "" then
+        table.insert(list, { name = name, value = text, category = category })
+    end
 end
 
 local function collectServerEntries(player)
@@ -49,7 +69,11 @@ local function collectServerEntries(player)
     for _, child in ipairs(player:GetChildren()) do
         if child:IsA("Folder") or child:IsA("Model") or child:IsA("ValueBase") then
             if isRoleLikeName(child.Name) then
-                table.insert(roles, { name = child.Name, value = normalizeValue(child) })
+                if classifyName(child.Name) == "journal" then
+                    addEntry(journals, "journal", child.Name, child)
+                else
+                    addEntry(roles, "role", child.Name, child)
+                end
             end
         end
     end
@@ -57,10 +81,10 @@ local function collectServerEntries(player)
     for _, descendant in ipairs(player:GetDescendants()) do
         if descendant:IsA("ValueBase") or descendant:IsA("Folder") or descendant:IsA("Model") then
             if isRoleLikeName(descendant.Name) then
-                if string.find(string.lower(descendant.Name), "journal") or string.find(string.lower(descendant.Name), "diary") then
-                    table.insert(journals, { name = descendant.Name, value = normalizeValue(descendant) })
+                if classifyName(descendant.Name) == "journal" then
+                    addEntry(journals, "journal", descendant.Name, descendant)
                 else
-                    table.insert(roles, { name = descendant.Name, value = normalizeValue(descendant) })
+                    addEntry(roles, "role", descendant.Name, descendant)
                 end
             end
         end
@@ -68,25 +92,25 @@ local function collectServerEntries(player)
 
     for key, value in pairs(player:GetAttributes()) do
         if isRoleLikeName(key) then
-            table.insert(roles, { name = "Attribute:" .. key, value = normalizeValue(value) })
+            addEntry(roles, "role", "Attribute:" .. key, value)
         end
     end
 
     if player.Team then
-        table.insert(roles, { name = "Team", value = player.Team.Name })
+        addEntry(roles, "role", "Team", player.Team.Name)
     end
 
     local leaderstats = player:FindFirstChild("leaderstats")
     if leaderstats then
         for _, stat in ipairs(leaderstats:GetChildren()) do
             if isRoleLikeName(stat.Name) then
-                table.insert(roles, { name = stat.Name, value = normalizeValue(stat.Value) })
+                if classifyName(stat.Name) == "journal" then
+                    addEntry(journals, "journal", stat.Name, stat.Value)
+                else
+                    addEntry(roles, "role", stat.Name, stat.Value)
+                end
             end
         end
-    end
-
-    if player:GetRankInGroup(1) ~= nil then
-        -- Keep this harmless; the client only receives what is already visible server-side.
     end
 
     return {
@@ -95,16 +119,21 @@ local function collectServerEntries(player)
     }
 end
 
-local remote = ReplicatedStorage:FindFirstChild("FlickerRoleViewerRemote")
-if remote then
-    remote:Destroy()
+local function ensureRemoteFunction()
+    local existing = ReplicatedStorage:FindFirstChild("FlickerRoleViewerRemote")
+    if existing then
+        existing:Destroy()
+    end
+
+    local remote = Instance.new("RemoteFunction")
+    remote.Name = "FlickerRoleViewerRemote"
+    remote.Parent = ReplicatedStorage
+    return remote
 end
 
-local newRemote = Instance.new("RemoteFunction")
-newRemote.Name = "FlickerRoleViewerRemote"
-newRemote.Parent = ReplicatedStorage
+local remote = ensureRemoteFunction()
 
-newRemote.OnServerInvoke = function(player, action)
+remote.OnServerInvoke = function(player, action)
     if action ~= "GetRoleData" then
         return nil
     end
@@ -116,7 +145,3 @@ newRemote.OnServerInvoke = function(player, action)
 
     return snapshot
 end
-
-Players.PlayerAdded:Connect(function(player)
-    -- No-op; the client asks for the data on demand.
-end)
