@@ -1,10 +1,22 @@
--- Flicker Role Viewer (clean rebuild)
--- Mobile-friendly and client-side only.
+-- Flicker Role Viewer (rebuild)
+-- Fully client-side, mobile-friendly, and no Studio setup required.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TextChatService = game:GetService("TextChatService")
+local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer or Players:WaitForChild("LocalPlayer")
+local chatHistory = {}
+local MAX_CHAT_HISTORY = 150
+
+local ROLE_KEYWORDS = {
+    "role", "rank", "title", "team", "faction", "guild", "group", "class", "job",
+    "permission", "perm", "access", "authority", "status", "power", "level", "affinity",
+    "journal", "diary", "notes", "entry", "log", "memo", "evidence", "report", "archive"
+}
+
+local JOURNAL_KEYWORDS = { "journal", "diary", "notes", "entry", "log", "memo", "evidence", "report", "archive" }
 
 local function normalizeText(value)
     if value == nil then
@@ -16,6 +28,9 @@ local function normalizeText(value)
         if value:IsA("StringValue") or value:IsA("IntValue") or value:IsA("NumberValue") or value:IsA("BoolValue") then
             return tostring(value.Value)
         end
+        if value:IsA("Folder") or value:IsA("Model") then
+            return value.Name
+        end
         return value.Name
     end
 
@@ -26,80 +41,103 @@ local function normalizeText(value)
     return tostring(value)
 end
 
-local function isRoleKeyword(name)
-    local lower = string.lower(name or "")
-    return string.find(lower, "role", 1, true)
-        or string.find(lower, "rank", 1, true)
-        or string.find(lower, "team", 1, true)
-        or string.find(lower, "faction", 1, true)
-        or string.find(lower, "title", 1, true)
-        or string.find(lower, "group", 1, true)
-        or string.find(lower, "perm", 1, true)
-        or string.find(lower, "access", 1, true)
-        or string.find(lower, "journal", 1, true)
-        or string.find(lower, "diary", 1, true)
-        or string.find(lower, "notes", 1, true)
+local function containsAny(text, list)
+    local lower = string.lower(tostring(text or ""))
+    for _, item in ipairs(list) do
+        if string.find(lower, item, 1, true) then
+            return true
+        end
+    end
+    return false
 end
 
-local function addHint(list, name, value)
+local function isRoleLike(name)
+    return containsAny(name, ROLE_KEYWORDS)
+end
+
+local function isJournalLike(name)
+    return containsAny(name, JOURNAL_KEYWORDS)
+end
+
+local function addCandidate(found, name, value)
     local text = normalizeText(value)
     if text ~= "" then
-        table.insert(list, { name = name, value = text })
+        table.insert(found, { name = name, value = text })
     end
 end
 
-local function collectHints(target)
-    local hints = {}
-    if not target then
-        return hints
-    end
-
+local function collectCandidates(target)
+    local output = {}
     local seen = {}
 
-    local function addUnique(name, value)
+    local function push(name, value)
         local key = tostring(name) .. "::" .. tostring(value)
         if not seen[key] then
             seen[key] = true
-            addHint(hints, name, value)
+            addCandidate(output, name, value)
         end
     end
 
+    if not target then
+        return output
+    end
+
     for _, child in ipairs(target:GetChildren()) do
-        if isRoleKeyword(child.Name) then
-            addUnique(child.Name, child)
+        if child:IsA("ValueBase") or child:IsA("Folder") or child:IsA("Model") then
+            if isRoleLike(child.Name) or isJournalLike(child.Name) then
+                push(child.Name, child)
+            end
         end
     end
 
     for _, desc in ipairs(target:GetDescendants()) do
-        if isRoleKeyword(desc.Name) then
-            addUnique(desc.Name, desc)
+        if desc:IsA("ValueBase") or desc:IsA("Folder") or desc:IsA("Model") then
+            if isRoleLike(desc.Name) or isJournalLike(desc.Name) then
+                push(desc.Name, desc)
+            end
         end
     end
 
     for key, value in pairs(target:GetAttributes()) do
-        if isRoleKeyword(key) then
-            addUnique("Attribute:" .. key, value)
+        if isRoleLike(key) then
+            push("Attribute:" .. key, value)
         end
     end
 
     if target:IsA("Player") then
         if target.Team then
-            addUnique("Team", target.Team.Name)
+            push("Team", target.Team.Name)
         end
-        if target.DisplayName then
-            addUnique("DisplayName", target.DisplayName)
+        if target.DisplayName and target.DisplayName ~= "" then
+            push("DisplayName", target.DisplayName)
         end
+
         local leaderstats = target:FindFirstChild("leaderstats")
         if leaderstats then
             for _, stat in ipairs(leaderstats:GetChildren()) do
-                if isRoleKeyword(stat.Name) then
-                    addUnique(stat.Name, stat.Value)
+                if isRoleLike(stat.Name) or isJournalLike(stat.Name) then
+                    push(stat.Name, stat.Value)
+                end
+            end
+        end
+
+        local character = target.Character or target:FindFirstChildOfClass("Model")
+        if character then
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                push("Health", humanoid.Health)
+                push("MaxHealth", humanoid.MaxHealth)
+            end
+
+            for _, part in ipairs(character:GetDescendants()) do
+                if part:IsA("ValueBase") and (isRoleLike(part.Name) or isJournalLike(part.Name)) then
+                    push(part.Name, part.Value)
                 end
             end
         end
     end
 
-    return hints
+    return output
 end
 
 local function getServerSnapshot()
@@ -111,36 +149,31 @@ local function getServerSnapshot()
     local ok, result = pcall(function()
         return remote:InvokeServer("GetRoleData")
     end)
-
     if ok and type(result) == "table" and type(result.players) == "table" then
         return result
     end
-
     return nil
 end
 
 local function buildSnapshot()
     local serverSnapshot = getServerSnapshot()
-    local out = {}
+    local snapshot = {}
 
     for _, player in ipairs(Players:GetPlayers()) do
-        local serverData = {}
+        local entry = {}
         if serverSnapshot then
-            local entry = serverSnapshot.players[tostring(player.UserId)] or serverSnapshot.players[player.Name]
-            if type(entry) == "table" then
-                serverData = entry
-            end
+            entry = serverSnapshot.players[tostring(player.UserId)] or serverSnapshot.players[player.Name] or {}
         end
 
-        table.insert(out, {
+        table.insert(snapshot, {
             player = player,
-            clientHints = collectHints(player),
-            serverRoles = serverData.roles or {},
-            serverJournals = serverData.journals or {},
+            clientRoles = collectCandidates(player),
+            serverRoles = entry.roles or {},
+            serverJournals = entry.journals or {},
         })
     end
 
-    return out
+    return snapshot
 end
 
 local function summarize(list)
@@ -153,11 +186,11 @@ local function summarize(list)
     return lines
 end
 
-local function makeCard(parent, title, subtitle, lines, accentColor)
+local function createCard(parent, title, subtitle, lines, accentColor)
     local card = Instance.new("Frame")
     card.Size = UDim2.new(1, -12, 0, 0)
     card.AutomaticSize = Enum.AutomaticSize.Y
-    card.BackgroundColor3 = Color3.fromRGB(18, 23, 31)
+    card.BackgroundColor3 = Color3.fromRGB(17, 22, 30)
     card.BorderSizePixel = 0
     card.Parent = parent
 
@@ -172,26 +205,26 @@ local function makeCard(parent, title, subtitle, lines, accentColor)
     pad.PaddingBottom = UDim.new(0, 10)
     pad.Parent = card
 
-    local line1 = Instance.new("TextLabel")
-    line1.Size = UDim2.new(1, 0, 0, 18)
-    line1.BackgroundTransparency = 1
-    line1.Text = title
-    line1.TextColor3 = accentColor or Color3.fromRGB(255, 255, 255)
-    line1.TextXAlignment = Enum.TextXAlignment.Left
-    line1.Font = Enum.Font.GothamBold
-    line1.TextSize = 13
-    line1.Parent = card
+    local t1 = Instance.new("TextLabel")
+    t1.Size = UDim2.new(1, 0, 0, 18)
+    t1.BackgroundTransparency = 1
+    t1.Text = title
+    t1.TextColor3 = accentColor or Color3.fromRGB(255, 255, 255)
+    t1.TextXAlignment = Enum.TextXAlignment.Left
+    t1.Font = Enum.Font.GothamBold
+    t1.TextSize = 13
+    t1.Parent = card
 
-    local line2 = Instance.new("TextLabel")
-    line2.Size = UDim2.new(1, 0, 0, 16)
-    line2.Position = UDim2.new(0, 0, 0, 19)
-    line2.BackgroundTransparency = 1
-    line2.Text = subtitle
-    line2.TextColor3 = Color3.fromRGB(180, 188, 200)
-    line2.TextXAlignment = Enum.TextXAlignment.Left
-    line2.Font = Enum.Font.Gotham
-    line2.TextSize = 11
-    line2.Parent = card
+    local t2 = Instance.new("TextLabel")
+    t2.Size = UDim2.new(1, 0, 0, 16)
+    t2.Position = UDim2.new(0, 0, 0, 19)
+    t2.BackgroundTransparency = 1
+    t2.Text = subtitle
+    t2.TextColor3 = Color3.fromRGB(180, 188, 200)
+    t2.TextXAlignment = Enum.TextXAlignment.Left
+    t2.Font = Enum.Font.Gotham
+    t2.TextSize = 11
+    t2.Parent = card
 
     local body = Instance.new("TextLabel")
     body.Size = UDim2.new(1, 0, 0, 0)
@@ -208,6 +241,25 @@ local function makeCard(parent, title, subtitle, lines, accentColor)
     body.Parent = card
 
     return card
+end
+
+local function recordChat(message)
+    if not message or not message.Text or message.Text == "" then
+        return
+    end
+
+    local speaker = message.Speaker and (message.Speaker.DisplayName or message.Speaker.Name) or "System"
+    local channel = message.Channel and message.Channel.Name or "Chat"
+    table.insert(chatHistory, 1, {
+        speaker = speaker,
+        text = tostring(message.Text),
+        channel = channel,
+        time = os.time(),
+    })
+
+    while #chatHistory > MAX_CHAT_HISTORY do
+        table.remove(chatHistory)
+    end
 end
 
 local function createGui()
@@ -228,18 +280,18 @@ local function createGui()
 
     local main = Instance.new("Frame")
     main.Name = "Main"
-    main.Size = UDim2.new(0, 420, 0, 520)
+    main.Size = UDim2.new(0, 430, 0, 540)
     main.Position = UDim2.new(0, 14, 0, 14)
     main.BackgroundColor3 = Color3.fromRGB(7, 10, 16)
     main.BorderSizePixel = 0
     main.Parent = screenGui
 
-    local mainCorner = Instance.new("UICorner")
-    mainCorner.CornerRadius = UDim.new(0, 16)
-    mainCorner.Parent = main
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 16)
+    corner.Parent = main
 
     local header = Instance.new("Frame")
-    header.Size = UDim2.new(1, 0, 0, 80)
+    header.Size = UDim2.new(1, 0, 0, 78)
     header.BackgroundTransparency = 1
     header.Parent = main
 
@@ -255,10 +307,10 @@ local function createGui()
     title.Parent = header
 
     local subtitle = Instance.new("TextLabel")
-    subtitle.Size = UDim2.new(1, -28, 0, 36)
+    subtitle.Size = UDim2.new(1, -28, 0, 40)
     subtitle.Position = UDim2.new(0, 14, 0, 36)
     subtitle.BackgroundTransparency = 1
-    subtitle.Text = "Client-side role and journal scan. Mobile-friendly, simple, and easy to reopen."
+    subtitle.Text = "No Studio script needed. This viewer scans what the client can see and captures live chat in one place."
     subtitle.TextColor3 = Color3.fromRGB(185, 193, 206)
     subtitle.TextXAlignment = Enum.TextXAlignment.Left
     subtitle.TextWrapped = true
@@ -269,7 +321,7 @@ local function createGui()
     local closeButton = Instance.new("TextButton")
     closeButton.Size = UDim2.new(0, 34, 0, 34)
     closeButton.Position = UDim2.new(1, -46, 0, 10)
-    closeButton.BackgroundColor3 = Color3.fromRGB(38, 46, 58)
+    closeButton.BackgroundColor3 = Color3.fromRGB(42, 50, 62)
     closeButton.Text = "×"
     closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
     closeButton.Font = Enum.Font.GothamBold
@@ -280,20 +332,20 @@ local function createGui()
     closeCorner.CornerRadius = UDim.new(0, 8)
     closeCorner.Parent = closeButton
 
-    local tabBar = Instance.new("Frame")
-    tabBar.Size = UDim2.new(1, -14, 0, 40)
-    tabBar.Position = UDim2.new(0, 7, 0, 80)
-    tabBar.BackgroundTransparency = 1
-    tabBar.Parent = main
+    local tabs = Instance.new("Frame")
+    tabs.Size = UDim2.new(1, -14, 0, 38)
+    tabs.Position = UDim2.new(0, 7, 0, 80)
+    tabs.BackgroundTransparency = 1
+    tabs.Parent = main
 
     local tabLayout = Instance.new("UIGridLayout")
     tabLayout.CellPadding = UDim2.new(0, 6, 0, 6)
-    tabLayout.CellSize = UDim2.new(0, 94, 0, 32)
+    tabLayout.CellSize = UDim2.new(0, 96, 0, 32)
     tabLayout.StartCorner = Enum.StartCorner.TopLeft
-    tabLayout.Parent = tabBar
+    tabLayout.Parent = tabs
 
     local content = Instance.new("Frame")
-    content.Size = UDim2.new(1, -14, 1, -130)
+    content.Size = UDim2.new(1, -14, 1, -128)
     content.Position = UDim2.new(0, 7, 0, 120)
     content.BackgroundTransparency = 1
     content.Parent = main
@@ -305,7 +357,7 @@ local function createGui()
     overviewFrame.Parent = content
 
     local overviewLayout = Instance.new("UIListLayout")
-    overviewLayout.Padding = UDim.new(0, 8)
+    overviewLayout.Padding = UDim2.new(0, 8)
     overviewLayout.SortOrder = Enum.SortOrder.LayoutOrder
     overviewLayout.Parent = overviewFrame
 
@@ -317,21 +369,21 @@ local function createGui()
     playersFrame.Parent = content
 
     local playersLayout = Instance.new("UIListLayout")
-    playersLayout.Padding = UDim.new(0, 8)
+    playersLayout.Padding = UDim2.new(0, 8)
     playersLayout.SortOrder = Enum.SortOrder.LayoutOrder
     playersLayout.Parent = playersFrame
 
-    local notesFrame = Instance.new("ScrollingFrame")
-    notesFrame.Size = UDim2.new(1, 0, 1, 0)
-    notesFrame.BackgroundTransparency = 1
-    notesFrame.ScrollBarThickness = 5
-    notesFrame.Visible = false
-    notesFrame.Parent = content
+    local chatsFrame = Instance.new("ScrollingFrame")
+    chatsFrame.Size = UDim2.new(1, 0, 1, 0)
+    chatsFrame.BackgroundTransparency = 1
+    chatsFrame.ScrollBarThickness = 5
+    chatsFrame.Visible = false
+    chatsFrame.Parent = content
 
-    local notesLayout = Instance.new("UIListLayout")
-    notesLayout.Padding = UDim.new(0, 8)
-    notesLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    notesLayout.Parent = notesFrame
+    local chatsLayout = Instance.new("UIListLayout")
+    chatsLayout.Padding = UDim2.new(0, 8)
+    chatsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    chatsLayout.Parent = chatsFrame
 
     local function clearFrame(frame)
         if not frame then return end
@@ -345,26 +397,26 @@ local function createGui()
     local function setTab(name)
         overviewFrame.Visible = name == "Overview"
         playersFrame.Visible = name == "Players"
-        notesFrame.Visible = name == "Notes"
+        chatsFrame.Visible = name == "Chats"
 
-        for _, child in ipairs(tabBar:GetChildren()) do
+        for _, child in ipairs(tabs:GetChildren()) do
             if child:IsA("TextButton") then
                 child.BackgroundColor3 = child.Name == name and Color3.fromRGB(69, 104, 255) or Color3.fromRGB(24, 30, 40)
             end
         end
     end
 
-    local function createTab(name)
+    local function makeTab(name)
         local tab = Instance.new("TextButton")
         tab.Name = name
-        tab.Size = UDim2.new(0, 94, 0, 32)
+        tab.Size = UDim2.new(0, 96, 0, 32)
         tab.BackgroundColor3 = name == "Overview" and Color3.fromRGB(69, 104, 255) or Color3.fromRGB(24, 30, 40)
         tab.Text = name
         tab.TextColor3 = Color3.fromRGB(255, 255, 255)
         tab.Font = Enum.Font.GothamBold
         tab.TextSize = 11
         tab.AutoButtonColor = true
-        tab.Parent = tabBar
+        tab.Parent = tabs
 
         local corner = Instance.new("UICorner")
         corner.CornerRadius = UDim.new(0, 8)
@@ -375,66 +427,71 @@ local function createGui()
         end)
     end
 
-    createTab("Overview")
-    createTab("Players")
-    createTab("Notes")
+    makeTab("Overview")
+    makeTab("Players")
+    makeTab("Chats")
 
     local function refreshView()
         clearFrame(overviewFrame)
         clearFrame(playersFrame)
-        clearFrame(notesFrame)
+        clearFrame(chatsFrame)
 
         local snapshot = buildSnapshot()
         local serverAvailable = getServerSnapshot() ~= nil
 
         if #snapshot == 0 then
-            makeCard(overviewFrame, "No players detected", "The game is not exposing players yet.", { "Try again after players spawn." }, Color3.fromRGB(130, 220, 255))
-            makeCard(playersFrame, "No players detected", "The game is not exposing players yet.", { "Try again after players spawn." }, Color3.fromRGB(130, 220, 255))
-            makeCard(notesFrame, "Status", serverAvailable and "Server helper is available." or "Running in client-only mode.", { "This viewer reads what the client can see." }, Color3.fromRGB(130, 220, 255))
+            createCard(overviewFrame, "No players found", "The client is not exposing players yet.", { "Try again after the round starts." }, Color3.fromRGB(130, 220, 255))
+            createCard(playersFrame, "Nothing to show", "No player data is visible yet.", { "If the game hides role values, this viewer cannot invent them." }, Color3.fromRGB(130, 220, 255))
+            createCard(chatsFrame, "Chat feed", serverAvailable and "Server helper available." or "Client-only chat capture active.", { "Chat messages will appear here as they arrive." }, Color3.fromRGB(130, 220, 255))
             return
         end
 
-        local overviewLines = {
-            "Client-only scan active.",
-            "Server helper: " .. (serverAvailable and "available" or "not found"),
-            "Refresh interval: 1 second.",
-            "Tip: if you do not see any role values, the game is not exposing them to the client.",
-        }
-        makeCard(overviewFrame, "Overview", "What this viewer reads", overviewLines, Color3.fromRGB(130, 220, 255))
+        createCard(overviewFrame, "Overview", "What this viewer can read", {
+            "Client scan mode: active",
+            "Server helper: " .. (serverAvailable and "available" or "not required"),
+            "Chat capture: live",
+            "Tip: if values are hidden, the viewer shows a safe empty state instead of fake numbers.",
+        }, Color3.fromRGB(130, 220, 255))
 
         for _, entry in ipairs(snapshot) do
             local player = entry.player
-            local clientLines = summarize(entry.clientHints)
+            local clientLines = summarize(entry.clientRoles)
             local serverLines = summarize(entry.serverRoles)
             local journalLines = summarize(entry.serverJournals)
 
             if #clientLines == 0 and #serverLines == 0 and #journalLines == 0 then
-                clientLines = { "No obvious role or journal values were found in this session." }
+                clientLines = { "No obvious role, rank, faction, or journal values were found in this session." }
             end
 
-            local accent = Color3.fromRGB(120, 210, 255)
-            if string.find(string.lower(tostring(player.DisplayName) .. " " .. tostring(player.Name)), "evil", 1, true) then
+            local accent = Color3.fromRGB(127, 210, 255)
+            local text = string.lower(tostring(player.DisplayName) .. " " .. tostring(player.Name))
+            if string.find(text, "evil", 1, true) then
                 accent = Color3.fromRGB(255, 120, 120)
-            elseif string.find(string.lower(tostring(player.DisplayName) .. " " .. tostring(player.Name)), "good", 1, true) then
+            elseif string.find(text, "good", 1, true) then
                 accent = Color3.fromRGB(120, 255, 150)
             end
 
-            makeCard(playersFrame, player.Name, player.DisplayName .. " | Team: " .. tostring(player.Team and player.Team.Name or "None"), clientLines, accent)
+            createCard(playersFrame, player.Name, player.DisplayName .. " | Team: " .. tostring(player.Team and player.Team.Name or "None"), clientLines, accent)
 
             if #serverLines > 0 then
-                makeCard(notesFrame, player.Name .. " (server)", "Server snapshot values", serverLines, accent)
+                createCard(playersFrame, player.Name .. " (server)", "Extra server snapshot values", serverLines, accent)
             end
             if #journalLines > 0 then
-                makeCard(notesFrame, player.Name .. " (journals)", "Journal-like values", journalLines, accent)
+                createCard(playersFrame, player.Name .. " (journals)", "Journal-like values", journalLines, accent)
             end
-            if #serverLines == 0 and #journalLines == 0 then
-                makeCard(notesFrame, player.Name, "No server role data found", { "This usually means the game is not exposing those values to the client." }, accent)
+        end
+
+        if #chatHistory > 0 then
+            for _, item in ipairs(chatHistory) do
+                createCard(chatsFrame, item.speaker, item.channel .. " • " .. os.date("!%H:%M", item.time), { item.text }, Color3.fromRGB(130, 220, 255))
             end
+        else
+            createCard(chatsFrame, "No chat yet", "Chat capture is active.", { "Messages will appear here when they arrive." }, Color3.fromRGB(130, 220, 255))
         end
 
         overviewFrame.CanvasSize = UDim2.new(0, 0, 0, overviewLayout.AbsoluteContentSize.Y + 10)
         playersFrame.CanvasSize = UDim2.new(0, 0, 0, playersLayout.AbsoluteContentSize.Y + 10)
-        notesFrame.CanvasSize = UDim2.new(0, 0, 0, notesLayout.AbsoluteContentSize.Y + 10)
+        chatsFrame.CanvasSize = UDim2.new(0, 0, 0, chatsLayout.AbsoluteContentSize.Y + 10)
     end
 
     local toggle = Instance.new("TextButton")
@@ -459,6 +516,28 @@ local function createGui()
 
     toggle.MouseButton1Click:Connect(function()
         main.Visible = not main.Visible
+    end)
+
+    if TextChatService and typeof(TextChatService.OnIncomingMessage) == "RBXScriptSignal" then
+        TextChatService.OnIncomingMessage:Connect(function(message)
+            pcall(recordChat, message)
+        end)
+    end
+
+    Players.PlayerChatted:Connect(function(player, message)
+        if player and message and message ~= "" then
+            pcall(function()
+                table.insert(chatHistory, 1, {
+                    speaker = player.DisplayName ~= "" and player.DisplayName or player.Name,
+                    text = tostring(message),
+                    channel = "Chat",
+                    time = os.time(),
+                })
+                while #chatHistory > MAX_CHAT_HISTORY do
+                    table.remove(chatHistory)
+                end
+            end)
+        end
     end)
 
     refreshView()

@@ -1,6 +1,6 @@
 # Flicker Role Viewer for Arceus X
 
-This folder now contains a cleaned-up, client-side role viewer for Roblox / Arceus X, plus an optional server helper for richer data.
+This folder now contains a fully client-side role viewer for Roblox / Arceus X, designed to work from Arceus X alone with no Studio script required.
 
 ## Mobile setup guide
 1. Open Arceus X and paste this loadstring into the executor:
@@ -9,10 +9,11 @@ This folder now contains a cleaned-up, client-side role viewer for Roblox / Arce
 loadstring(game:HttpGet("https://raw.githubusercontent.com/angel09081816-arch/ArceusX-Scripts/main/Flicker_Role_Viewer.lua"))()
 ```
 
-2. Tap Execute. The viewer opens as a small floating window on the right side of the screen.
+2. Tap Execute. The viewer opens automatically as a small floating panel.
 3. If the panel is hidden, tap the blue Open Viewer button at the bottom-right corner to show it again.
-4. Use the tabs at the top to switch between Overview, Players, and Notes.
-5. If you want extra data from the server, place `Flicker_Role_Viewer_Server.lua` into ServerScriptService in Roblox Studio and run the game once. The client script will use that helper automatically when it is available.
+4. Use the tabs at the top to switch between Overview, Players, and Chats.
+5. No Studio script is required. Everything runs from Arceus X and uses live local scanning plus chat capture.
+6. If you still want extra server-side data, the optional helper in `Flicker_Role_Viewer_Server.lua` can be added later, but it is not required for the viewer to launch.
 
 ## Why the viewer may look empty
 - The script only reads values the client can see. If the game keeps role data inside hidden server-only objects, no client script can reveal them reliably.
@@ -20,9 +21,10 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/angel09081816-arch/Ar
 - The UI is intentionally simple and mobile-friendly so it does not rely on fragile drag logic.
 
 ## What changed
-- Rebuilt the viewer from scratch to remove the older unstable UI path.
-- Kept the client-side scan simple and safe.
-- Kept the optional server helper as a fallback, not as a requirement.
+- Rebuilt the viewer from scratch to remove the old fragile UI path.
+- Added live chat capture with both chat service and player chat fallback.
+- Kept the scan client-side, safe, and fully automated.
+- Removed the need for any Studio-side setup to use the main viewer.
 
 ## What to put on GitHub
 Upload this exact file to a public GitHub repository:
@@ -43,6 +45,7 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/angel09081816-arch/Ar
 ## What the viewer does now
 - Creates a small, simple panel that is easy to open and close.
 - Scans the local player and nearby player data for role/rank/team/faction/title and journal-like values when the game exposes them.
+- Captures live chat and ghost/whisper-style messages when the game sends them to the client.
 - Uses large touch-friendly buttons and simple tabs for mobile use.
 - Refreshes every second so the list updates while you play.
 
