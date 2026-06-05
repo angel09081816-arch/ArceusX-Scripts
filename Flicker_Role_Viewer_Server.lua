@@ -41,6 +41,21 @@ local function isRoleLikeName(name)
         or string.find(lower, "journal")
         or string.find(lower, "diary")
         or string.find(lower, "notes")
+        or string.find(lower, "log")
+        or string.find(lower, "entry")
+        or string.find(lower, "memo")
+        or string.find(lower, "evidence")
+end
+
+local function isJournalLikeName(name)
+    local lower = string.lower(name or "")
+    return string.find(lower, "journal")
+        or string.find(lower, "diary")
+        or string.find(lower, "notes")
+        or string.find(lower, "entry")
+        or string.find(lower, "memo")
+        or string.find(lower, "log")
+        or string.find(lower, "evidence")
 end
 
 local function classifyName(name)
@@ -69,7 +84,7 @@ local function collectServerEntries(player)
     for _, child in ipairs(player:GetChildren()) do
         if child:IsA("Folder") or child:IsA("Model") or child:IsA("ValueBase") then
             if isRoleLikeName(child.Name) then
-                if classifyName(child.Name) == "journal" then
+                if isJournalLikeName(child.Name) then
                     addEntry(journals, "journal", child.Name, child)
                 else
                     addEntry(roles, "role", child.Name, child)
@@ -81,7 +96,7 @@ local function collectServerEntries(player)
     for _, descendant in ipairs(player:GetDescendants()) do
         if descendant:IsA("ValueBase") or descendant:IsA("Folder") or descendant:IsA("Model") then
             if isRoleLikeName(descendant.Name) then
-                if classifyName(descendant.Name) == "journal" then
+                if isJournalLikeName(descendant.Name) then
                     addEntry(journals, "journal", descendant.Name, descendant)
                 else
                     addEntry(roles, "role", descendant.Name, descendant)
@@ -104,7 +119,7 @@ local function collectServerEntries(player)
     if leaderstats then
         for _, stat in ipairs(leaderstats:GetChildren()) do
             if isRoleLikeName(stat.Name) then
-                if classifyName(stat.Name) == "journal" then
+                if isJournalLikeName(stat.Name) then
                     addEntry(journals, "journal", stat.Name, stat.Value)
                 else
                     addEntry(roles, "role", stat.Name, stat.Value)

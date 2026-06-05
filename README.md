@@ -23,7 +23,7 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/angel09081816-arch/Ar
 2. Open the script executor tab.
 3. Paste the loadstring above.
 4. Execute it.
-5. A polished viewer will appear with dedicated tabs for Roles, Journals, and Summary, plus a draggable window, an Open Viewer button, and scrollable cards.
+5. A polished viewer will appear with dedicated tabs for People, Journals, Chats, and Summary, plus a draggable window, an Open Viewer button, and scrollable cards.
 6. If the viewer still shows no role values, place the server helper file in ServerScriptService and run the script again.
 
 ## Optional server helper
@@ -35,7 +35,9 @@ This script only reads values that are visible to the client. If Flicker stores 
 
 ## What the script does
 - Creates a small on-screen panel.
-- Scans the local player and nearby player data for role/rank/team/faction/title related values.
+- Scans the local player and nearby player data for role/rank/team/faction/title and journal-like values.
+- Captures incoming chat messages so ghost / whisper / chat feed style messages can be reviewed in the new Chats tab.
+- Colors player names by likely good/evil affinity so evil-side names stand out in red and good-side names in green.
 - Refreshes every second so the UI updates while you play.
 
 ## Verification

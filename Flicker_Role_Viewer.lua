@@ -6,8 +6,11 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local TextChatService = game:GetService("TextChatService")
 
 local LocalPlayer = Players.LocalPlayer or Players:WaitForChild("LocalPlayer")
+local chatHistory = {}
+local MAX_CHAT_HISTORY = 120
 
 local function normalizeText(value)
     if value == nil then
@@ -45,6 +48,72 @@ local function isRoleLikeName(name)
         or string.find(lower, "journal")
         or string.find(lower, "diary")
         or string.find(lower, "notes")
+        or string.find(lower, "log")
+        or string.find(lower, "entry")
+        or string.find(lower, "memo")
+        or string.find(lower, "evidence")
+end
+
+local function isJournalLikeName(name)
+    local lower = string.lower(name or "")
+    return string.find(lower, "journal")
+        or string.find(lower, "diary")
+        or string.find(lower, "notes")
+        or string.find(lower, "entry")
+        or string.find(lower, "memo")
+        or string.find(lower, "log")
+        or string.find(lower, "evidence")
+end
+
+local function classifyRoleAffinity(text)
+    local lower = string.lower(tostring(text or ""))
+    local evilKeywords = {"evil", "killer", "demon", "monster", "ghost", "shadow", "vampire", "cult", "mafia", "traitor", "villain", "dark", "blood", "curse", "revenant", "devil"}
+    local goodKeywords = {"good", "hero", "angel", "guardian", "survivor", "innocent", "police", "light", "healer", "sheriff", "protect", "saint", "holy"}
+
+    local hasEvil = false
+    local hasGood = false
+
+    for _, keyword in ipairs(evilKeywords) do
+        if string.find(lower, keyword, 1, true) then
+            hasEvil = true
+            break
+        end
+    end
+
+    for _, keyword in ipairs(goodKeywords) do
+        if string.find(lower, keyword, 1, true) then
+            hasGood = true
+            break
+        end
+    end
+
+    if hasEvil and not hasGood then
+        return "evil"
+    end
+    if hasGood and not hasEvil then
+        return "good"
+    end
+    return "neutral"
+end
+
+local function getRoleAffinityColor(player, entry)
+    local combined = table.concat({
+        player.Team and player.Team.Name or "",
+        player.DisplayName or "",
+        tostring(player.Name),
+        table.concat(summarizeCandidates(entry.clientRoles or {}), " "),
+        table.concat(summarizeCandidates(entry.serverRoles or {}), " "),
+        table.concat(summarizeCandidates(entry.journals or {}), " "),
+    }, " ")
+
+    local affinity = classifyRoleAffinity(combined)
+    if affinity == "evil" then
+        return Color3.fromRGB(255, 90, 90)
+    end
+    if affinity == "good" then
+        return Color3.fromRGB(90, 255, 130)
+    end
+    return Color3.fromRGB(255, 255, 255)
 end
 
 local function addCandidate(found, name, value)
@@ -75,8 +144,9 @@ local function collectClientCandidates(target)
 
     for _, descendant in ipairs(target:GetDescendants()) do
         if descendant:IsA("ValueBase") or descendant:IsA("Folder") or descendant:IsA("Model") then
-            if isRoleLikeName(descendant.Name) then
-                addCandidate(found, descendant.Name, descendant)
+            local name = descendant.Name
+            if isRoleLikeName(name) or isJournalLikeName(name) then
+                addCandidate(found, name, descendant)
             end
         end
     end
@@ -106,8 +176,9 @@ local function collectClientCandidates(target)
     local leaderstats = target:FindFirstChild("leaderstats")
     if leaderstats then
         for _, stat in ipairs(leaderstats:GetChildren()) do
-            if isRoleLikeName(stat.Name) then
-                addCandidate(found, stat.Name, stat.Value)
+            local name = stat.Name
+            if isRoleLikeName(name) or isJournalLikeName(name) then
+                addCandidate(found, name, stat.Value)
             end
         end
     end
@@ -170,7 +241,7 @@ local function summarizeCandidates(list)
     return output
 end
 
-local function createCard(parent, title, subtitle, lines)
+local function createCard(parent, title, subtitle, lines, accentColor)
     local card = Instance.new("Frame")
     card.Size = UDim2.new(1, -18, 0, 0)
     card.AutomaticSize = Enum.AutomaticSize.Y
@@ -193,7 +264,7 @@ local function createCard(parent, title, subtitle, lines)
     titleLabel.Size = UDim2.new(1, 0, 0, 18)
     titleLabel.BackgroundTransparency = 1
     titleLabel.Text = title
-    titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    titleLabel.TextColor3 = accentColor or Color3.fromRGB(255, 255, 255)
     titleLabel.TextXAlignment = Enum.TextXAlignment.Left
     titleLabel.Font = Enum.Font.GothamBold
     titleLabel.TextSize = 14
@@ -225,6 +296,30 @@ local function createCard(parent, title, subtitle, lines)
     textLabel.Parent = card
 
     return card
+end
+
+local function recordChatMessage(message)
+    if not message or not message.Text then
+        return
+    end
+
+    local speaker = message.Speaker and message.Speaker.DisplayName or (message.Speaker and message.Speaker.Name) or "System"
+    local text = tostring(message.Text or "")
+    if text == "" then
+        return
+    end
+
+    table.insert(chatHistory, 1, {
+        speaker = speaker,
+        text = text,
+        channel = message.Channel and message.Channel.Name or "Chat",
+        time = os.time(),
+        raw = message,
+    })
+
+    while #chatHistory > MAX_CHAT_HISTORY do
+        table.remove(chatHistory)
+    end
 end
 
 local function createGui()
@@ -310,7 +405,7 @@ local function createGui()
     tabBar.Parent = main
 
     local tabs = {}
-    local activeTab = "Roles"
+    local activeTab = "People"
 
     local content = Instance.new("Frame")
     content.Size = UDim2.new(1, -18, 1, -122)
@@ -338,8 +433,9 @@ local function createGui()
             for _, other in ipairs(tabs) do
                 other.Button.BackgroundColor3 = other.Name == activeTab and Color3.fromRGB(72, 107, 255) or Color3.fromRGB(25, 30, 40)
             end
-            rolesFrame.Visible = activeTab == "Roles"
+            rolesFrame.Visible = activeTab == "People"
             journalsFrame.Visible = activeTab == "Journals"
+            chatsFrame.Visible = activeTab == "Chats"
             summaryFrame.Visible = activeTab == "Summary"
         end)
 
@@ -373,6 +469,20 @@ local function createGui()
     journalsLayout.SortOrder = Enum.SortOrder.LayoutOrder
     journalsLayout.Parent = journalsFrame
 
+    local chatsFrame = Instance.new("ScrollingFrame")
+    chatsFrame.Name = "ChatsFrame"
+    chatsFrame.Size = UDim2.new(1, 0, 1, 0)
+    chatsFrame.BackgroundTransparency = 1
+    chatsFrame.BorderSizePixel = 0
+    chatsFrame.ScrollBarThickness = 6
+    chatsFrame.Visible = false
+    chatsFrame.Parent = content
+
+    local chatsLayout = Instance.new("UIListLayout")
+    chatsLayout.Padding = UDim.new(0, 8)
+    chatsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    chatsLayout.Parent = chatsFrame
+
     local summaryFrame = Instance.new("ScrollingFrame")
     summaryFrame.Name = "SummaryFrame"
     summaryFrame.Size = UDim2.new(1, 0, 1, 0)
@@ -399,6 +509,7 @@ local function createGui()
     local function refreshView()
         clearFrame(rolesFrame)
         clearFrame(journalsFrame)
+        clearFrame(chatsFrame)
         clearFrame(summaryFrame)
 
         local snapshot = buildPlayerSnapshot()
@@ -407,6 +518,7 @@ local function createGui()
         if #snapshot == 0 then
             createCard(rolesFrame, "No players found", "The game is not exposing players to this client session yet.", { "Try again after players spawn in." })
             createCard(journalsFrame, "No journals found", "No journal-like values were found in this session.", { "Server-side journal data appears when the game exposes it." })
+            createCard(chatsFrame, "No chat feed yet", "The chat service is not exposing messages in this session.", { "If ghost / whisper chats are enabled, they will appear here automatically." })
             createCard(summaryFrame, "Status", hasServer and "Server snapshot available." or "Client-only scan active.", { "The viewer reads what can be seen from the client." })
             return
         end
@@ -427,16 +539,26 @@ local function createGui()
                 end
             end
 
+            local accentColor = getRoleAffinityColor(player, entry)
+
             if #roleLines > 0 then
-                createCard(rolesFrame, player.Name .. "  •  " .. tostring(player.UserId), player.DisplayName .. " | Team: " .. tostring(player.Team and player.Team.Name or "None"), roleLines)
+                createCard(rolesFrame, player.Name .. "  •  " .. tostring(player.UserId), player.DisplayName .. " | Team: " .. tostring(player.Team and player.Team.Name or "None"), roleLines, accentColor)
             else
-                createCard(rolesFrame, player.Name .. "  •  " .. tostring(player.UserId), "No role data to show yet.", { "Refresh again or wait for the game to expose leaderstats / attributes." })
+                createCard(rolesFrame, player.Name .. "  •  " .. tostring(player.UserId), "No role data to show yet.", { "Refresh again or wait for the game to expose leaderstats / attributes." }, accentColor)
             end
 
             if #journalLines > 0 then
-                createCard(journalsFrame, player.Name .. "  •  " .. tostring(player.UserId), player.DisplayName, journalLines)
+                createCard(journalsFrame, player.Name .. "  •  " .. tostring(player.UserId), player.DisplayName, journalLines, accentColor)
             else
-                createCard(journalsFrame, player.Name .. "  •  " .. tostring(player.UserId), "No journal-like data found.", { "If the game stores journals under a different name, that data may not be visible to the client." })
+                createCard(journalsFrame, player.Name .. "  •  " .. tostring(player.UserId), "No journal-like data found.", { "If the game stores journals under a different name, that data may not be visible to the client." }, accentColor)
+            end
+
+            if #chatHistory > 0 then
+                for _, chat in ipairs(chatHistory) do
+                    createCard(chatsFrame, chat.speaker, chat.channel .. " • " .. tostring(os.date("!%H:%M", chat.time)), { chat.text }, accentColor)
+                end
+            else
+                createCard(chatsFrame, "No chat messages", "Chat feed is empty right now.", { "Messages will show up here as they arrive in-game." }, accentColor)
             end
 
             createCard(summaryFrame, player.Name, "Quick snapshot", {
@@ -452,11 +574,13 @@ local function createGui()
 
         rolesFrame.CanvasSize = UDim2.new(0, 0, 0, rolesLayout.AbsoluteContentSize.Y + 18)
         journalsFrame.CanvasSize = UDim2.new(0, 0, 0, journalsLayout.AbsoluteContentSize.Y + 18)
+        chatsFrame.CanvasSize = UDim2.new(0, 0, 0, chatsLayout.AbsoluteContentSize.Y + 18)
         summaryFrame.CanvasSize = UDim2.new(0, 0, 0, summaryLayout.AbsoluteContentSize.Y + 18)
     end
 
-    table.insert(tabs, createTab("Roles"))
+    table.insert(tabs, createTab("People"))
     table.insert(tabs, createTab("Journals"))
+    table.insert(tabs, createTab("Chats"))
     table.insert(tabs, createTab("Summary"))
 
     local refreshButton = Instance.new("TextButton")
@@ -546,6 +670,12 @@ local function createGui()
     end)
 
     refreshButton.MouseButton1Click:Connect(refreshView)
+
+    if TextChatService and typeof(TextChatService.OnIncomingMessage) == "RBXScriptSignal" then
+        TextChatService.OnIncomingMessage:Connect(function(message)
+            pcall(recordChatMessage, message)
+        end)
+    end
 
     refreshView()
     task.spawn(function()
