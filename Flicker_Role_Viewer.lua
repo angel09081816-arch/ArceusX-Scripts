@@ -1,5 +1,5 @@
--- Flicker Role Viewer
--- Mobile-friendly client viewer with a guaranteed floating toggle.
+-- Fresh Flicker role viewer for Roblox / Arceus X
+-- Touch-friendly, client-side, and color-coded for role names.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,43 +8,18 @@ local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer or Players:WaitForChild("LocalPlayer", 30)
-local chatHistory = {}
+local ChatHistory = {}
 local MAX_CHAT_HISTORY = 150
 
-local ROLE_KEYWORDS = {
-    "role", "rank", "title", "team", "faction", "guild", "group", "class", "job",
-    "permission", "perm", "access", "authority", "status", "power", "level", "affinity",
-    "journal", "diary", "notes", "entry", "log", "memo", "evidence", "report", "archive"
+local ROLE_HINTS = {
+    "role", "rank", "title", "team", "faction", "group", "guild", "class", "job",
+    "perm", "permission", "access", "authority", "status", "level", "power", "journal",
+    "diary", "notes", "evidence", "archive", "report", "affinity"
 }
 
-local JOURNAL_KEYWORDS = { "journal", "diary", "notes", "entry", "log", "memo", "evidence", "report", "archive" }
-
-local function normalizeText(value)
-    if value == nil then
-        return ""
-    end
-
-    local t = typeof(value)
-    if t == "Instance" then
-        if value:IsA("StringValue") or value:IsA("IntValue") or value:IsA("NumberValue") or value:IsA("BoolValue") then
-            return tostring(value.Value)
-        end
-        if value:IsA("Folder") or value:IsA("Model") then
-            return value.Name
-        end
-        return value.Name
-    end
-
-    if t == "string" or t == "number" or t == "boolean" then
-        return tostring(value)
-    end
-
-    return tostring(value)
-end
-
-local function containsAny(text, list)
+local function containsAny(text, words)
     local lower = string.lower(tostring(text or ""))
-    for _, item in ipairs(list) do
+    for _, item in ipairs(words) do
         if string.find(lower, item, 1, true) then
             return true
         end
@@ -52,40 +27,62 @@ local function containsAny(text, list)
     return false
 end
 
-local function isRoleLike(name)
-    return containsAny(name, ROLE_KEYWORDS)
-end
-
-local function isJournalLike(name)
-    return containsAny(name, JOURNAL_KEYWORDS)
-end
-
-local function addCandidate(found, name, value)
-    local text = normalizeText(value)
-    if text ~= "" then
-        table.insert(found, { name = name, value = text })
+local function normalizeValue(value)
+    if value == nil then
+        return ""
     end
+
+    local kind = typeof(value)
+    if kind == "Instance" then
+        if value:IsA("StringValue") or value:IsA("IntValue") or value:IsA("NumberValue") or value:IsA("BoolValue") then
+            return tostring(value.Value)
+        end
+        return tostring(value.Name)
+    end
+
+    return tostring(value)
 end
 
-local function collectCandidates(target)
-    local output = {}
+local function roleAccent(text)
+    local lower = string.lower(tostring(text or ""))
+
+    if string.find(lower, "detective", 1, true) or string.find(lower, "savior", 1, true) or string.find(lower, "guardian", 1, true) then
+        return Color3.fromRGB(92, 180, 255)
+    end
+
+    if string.find(lower, "clown", 1, true) then
+        return Color3.fromRGB(180, 180, 180)
+    end
+
+    if string.find(lower, "murderer", 1, true) or string.find(lower, "killer", 1, true) or string.find(lower, "evil", 1, true) or string.find(lower, "cult", 1, true) then
+        return Color3.fromRGB(255, 104, 104)
+    end
+
+    return Color3.fromRGB(130, 220, 255)
+end
+
+local function collectRoleHints(target)
+    local out = {}
     local seen = {}
 
     local function push(name, value)
         local key = tostring(name) .. "::" .. tostring(value)
         if not seen[key] then
             seen[key] = true
-            addCandidate(output, name, value)
+            local text = normalizeValue(value)
+            if text ~= "" then
+                table.insert(out, { name = tostring(name), value = text })
+            end
         end
     end
 
     if not target then
-        return output
+        return out
     end
 
     for _, child in ipairs(target:GetChildren()) do
         if child:IsA("ValueBase") or child:IsA("Folder") or child:IsA("Model") then
-            if isRoleLike(child.Name) or isJournalLike(child.Name) then
+            if containsAny(child.Name, ROLE_HINTS) then
                 push(child.Name, child)
             end
         end
@@ -93,14 +90,14 @@ local function collectCandidates(target)
 
     for _, desc in ipairs(target:GetDescendants()) do
         if desc:IsA("ValueBase") or desc:IsA("Folder") or desc:IsA("Model") then
-            if isRoleLike(desc.Name) or isJournalLike(desc.Name) then
+            if containsAny(desc.Name, ROLE_HINTS) then
                 push(desc.Name, desc)
             end
         end
     end
 
     for key, value in pairs(target:GetAttributes()) do
-        if isRoleLike(key) then
+        if containsAny(key, ROLE_HINTS) then
             push("Attribute:" .. key, value)
         end
     end
@@ -109,6 +106,7 @@ local function collectCandidates(target)
         if target.Team then
             push("Team", target.Team.Name)
         end
+
         if target.DisplayName and target.DisplayName ~= "" then
             push("DisplayName", target.DisplayName)
         end
@@ -116,7 +114,7 @@ local function collectCandidates(target)
         local leaderstats = target:FindFirstChild("leaderstats")
         if leaderstats then
             for _, stat in ipairs(leaderstats:GetChildren()) do
-                if isRoleLike(stat.Name) or isJournalLike(stat.Name) then
+                if containsAny(stat.Name, ROLE_HINTS) then
                     push(stat.Name, stat.Value)
                 end
             end
@@ -131,14 +129,14 @@ local function collectCandidates(target)
             end
 
             for _, part in ipairs(character:GetDescendants()) do
-                if part:IsA("ValueBase") and (isRoleLike(part.Name) or isJournalLike(part.Name)) then
+                if part:IsA("ValueBase") and containsAny(part.Name, ROLE_HINTS) then
                     push(part.Name, part.Value)
                 end
             end
         end
     end
 
-    return output
+    return out
 end
 
 local function getServerSnapshot()
@@ -162,16 +160,16 @@ local function buildSnapshot()
     local snapshot = {}
 
     for _, player in ipairs(Players:GetPlayers()) do
-        local entry = {}
-        if serverSnapshot then
-            entry = serverSnapshot.players[tostring(player.UserId)] or serverSnapshot.players[player.Name] or {}
+        local extra = {}
+        if serverSnapshot and serverSnapshot.players then
+            extra = serverSnapshot.players[tostring(player.UserId)] or serverSnapshot.players[player.Name] or {}
         end
 
         table.insert(snapshot, {
             player = player,
-            clientRoles = collectCandidates(player),
-            serverRoles = entry.roles or {},
-            serverJournals = entry.journals or {},
+            clientHints = collectRoleHints(player),
+            serverHints = extra.roles or {},
+            journalHints = extra.journals or {},
         })
     end
 
@@ -182,17 +180,17 @@ local function summarize(list)
     local lines = {}
     for _, item in ipairs(list or {}) do
         if item and item.name and item.value ~= nil then
-            table.insert(lines, string.format("%s: %s", tostring(item.name), tostring(item.value)))
+            table.insert(lines, tostring(item.name) .. ": " .. tostring(item.value))
         end
     end
     return lines
 end
 
-local function createCard(parent, title, subtitle, lines, accentColor)
+local function createCard(parent, title, subtitle, lines, accent)
     local card = Instance.new("Frame")
-    card.Size = UDim2.new(1, -10, 0, 0)
+    card.Size = UDim2.new(1, -8, 0, 0)
     card.AutomaticSize = Enum.AutomaticSize.Y
-    card.BackgroundColor3 = Color3.fromRGB(16, 21, 29)
+    card.BackgroundColor3 = Color3.fromRGB(16, 22, 30)
     card.BorderSizePixel = 0
     card.Parent = parent
 
@@ -211,7 +209,7 @@ local function createCard(parent, title, subtitle, lines, accentColor)
     titleLabel.Size = UDim2.new(1, 0, 0, 18)
     titleLabel.BackgroundTransparency = 1
     titleLabel.Text = title
-    titleLabel.TextColor3 = accentColor or Color3.fromRGB(255, 255, 255)
+    titleLabel.TextColor3 = accent or Color3.fromRGB(255, 255, 255)
     titleLabel.TextXAlignment = Enum.TextXAlignment.Left
     titleLabel.Font = Enum.Font.GothamBold
     titleLabel.TextSize = 13
@@ -222,7 +220,7 @@ local function createCard(parent, title, subtitle, lines, accentColor)
     subtitleLabel.Position = UDim2.new(0, 0, 0, 20)
     subtitleLabel.BackgroundTransparency = 1
     subtitleLabel.Text = subtitle
-    subtitleLabel.TextColor3 = Color3.fromRGB(183, 191, 204)
+    subtitleLabel.TextColor3 = Color3.fromRGB(185, 194, 208)
     subtitleLabel.TextXAlignment = Enum.TextXAlignment.Left
     subtitleLabel.Font = Enum.Font.Gotham
     subtitleLabel.TextSize = 11
@@ -234,7 +232,7 @@ local function createCard(parent, title, subtitle, lines, accentColor)
     body.Position = UDim2.new(0, 0, 0, 40)
     body.BackgroundTransparency = 1
     body.Text = table.concat(lines or {}, "\n")
-    body.TextColor3 = Color3.fromRGB(243, 247, 251)
+    body.TextColor3 = Color3.fromRGB(245, 248, 252)
     body.TextXAlignment = Enum.TextXAlignment.Left
     body.TextYAlignment = Enum.TextYAlignment.Top
     body.Font = Enum.Font.Code
@@ -247,22 +245,22 @@ local function createCard(parent, title, subtitle, lines, accentColor)
 end
 
 local function recordChat(message)
-    if not message or not message.Text or message.Text == "" then
+    if not message or not message.Text or tostring(message.Text) == "" then
         return
     end
 
     local speaker = message.Speaker and (message.Speaker.DisplayName or message.Speaker.Name) or "System"
     local channel = message.Channel and message.Channel.Name or "Chat"
 
-    table.insert(chatHistory, 1, {
+    table.insert(ChatHistory, 1, {
         speaker = speaker,
         text = tostring(message.Text),
         channel = channel,
         time = os.time(),
     })
 
-    while #chatHistory > MAX_CHAT_HISTORY do
-        table.remove(chatHistory)
+    while #ChatHistory > MAX_CHAT_HISTORY do
+        table.remove(ChatHistory)
     end
 end
 
@@ -296,53 +294,51 @@ local function createGui()
     screenGui.Parent = guiParent
 
     local isMobile = UserInputService.TouchEnabled or (UserInputService.GetDeviceFamily and UserInputService:GetDeviceFamily() == Enum.DeviceFamily.Phone)
-    local mainSize = isMobile and UDim2.new(1, -12, 0, 420) or UDim2.new(0, 430, 0, 540)
-    local mainPosition = isMobile and UDim2.new(0, 6, 0, 6) or UDim2.new(0, 14, 0, 14)
 
     local main = Instance.new("Frame")
     main.Name = "Main"
-    main.Size = mainSize
-    main.Position = mainPosition
+    main.Size = isMobile and UDim2.new(1, -12, 0, 430) or UDim2.new(0, 430, 0, 540)
+    main.Position = isMobile and UDim2.new(0, 6, 0, 6) or UDim2.new(0, 14, 0, 14)
     main.BackgroundColor3 = Color3.fromRGB(7, 10, 16)
     main.BorderSizePixel = 0
     main.Parent = screenGui
 
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 16)
-    corner.Parent = main
+    local mainCorner = Instance.new("UICorner")
+    mainCorner.CornerRadius = UDim.new(0, 16)
+    mainCorner.Parent = main
 
     local header = Instance.new("Frame")
-    header.Size = UDim2.new(1, 0, 0, 78)
+    header.Size = UDim2.new(1, 0, 0, 82)
     header.BackgroundTransparency = 1
     header.Parent = main
 
     local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, -80, 0, 24)
-    title.Position = UDim2.new(0, 14, 0, 10)
+    title.Size = UDim2.new(1, -86, 0, 24)
+    title.Position = UDim2.new(0, 12, 0, 10)
     title.BackgroundTransparency = 1
     title.Text = "Flicker Role Viewer"
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.TextXAlignment = Enum.TextXAlignment.Left
     title.Font = Enum.Font.GothamBold
     title.TextSize = isMobile and 15 or 17
+    title.TextXAlignment = Enum.TextXAlignment.Left
     title.Parent = header
 
     local subtitle = Instance.new("TextLabel")
     subtitle.Size = UDim2.new(1, -28, 0, 42)
-    subtitle.Position = UDim2.new(0, 14, 0, 36)
+    subtitle.Position = UDim2.new(0, 12, 0, 36)
     subtitle.BackgroundTransparency = 1
-    subtitle.Text = "Client-side role scan + live chat. Tap the blue button to open or hide this panel."
-    subtitle.TextColor3 = Color3.fromRGB(185, 193, 206)
+    subtitle.Text = "Fresh Flicker-style role scan with live chat and role-color names."
+    subtitle.TextColor3 = Color3.fromRGB(187, 194, 206)
     subtitle.TextXAlignment = Enum.TextXAlignment.Left
-    subtitle.TextWrapped = true
     subtitle.Font = Enum.Font.Gotham
     subtitle.TextSize = isMobile and 10 or 11
+    subtitle.TextWrapped = true
     subtitle.Parent = header
 
     local closeButton = Instance.new("TextButton")
-    closeButton.Size = UDim2.new(0, 34, 0, 34)
-    closeButton.Position = UDim2.new(1, -46, 0, 10)
-    closeButton.BackgroundColor3 = Color3.fromRGB(42, 50, 62)
+    closeButton.Size = UDim2.new(0, 36, 0, 36)
+    closeButton.Position = UDim2.new(1, -48, 0, 10)
+    closeButton.BackgroundColor3 = Color3.fromRGB(33, 39, 49)
     closeButton.Text = "×"
     closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
     closeButton.Font = Enum.Font.GothamBold
@@ -350,12 +346,12 @@ local function createGui()
     closeButton.Parent = main
 
     local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0, 8)
+    closeCorner.CornerRadius = UDim.new(0, 9)
     closeCorner.Parent = closeButton
 
     local tabs = Instance.new("Frame")
     tabs.Size = UDim2.new(1, -14, 0, 40)
-    tabs.Position = UDim2.new(0, 7, 0, 80)
+    tabs.Position = UDim2.new(0, 7, 0, 82)
     tabs.BackgroundTransparency = 1
     tabs.Parent = main
 
@@ -366,8 +362,8 @@ local function createGui()
     tabLayout.Parent = tabs
 
     local content = Instance.new("Frame")
-    content.Size = UDim2.new(1, -14, 1, -130)
-    content.Position = UDim2.new(0, 7, 0, 122)
+    content.Size = UDim2.new(1, -14, 1, -132)
+    content.Position = UDim2.new(0, 7, 0, 124)
     content.BackgroundTransparency = 1
     content.Parent = main
 
@@ -410,7 +406,6 @@ local function createGui()
         if not frame then
             return
         end
-
         for _, child in ipairs(frame:GetChildren()) do
             if child ~= frame:FindFirstChildOfClass("UIListLayout") then
                 child:Destroy()
@@ -425,7 +420,7 @@ local function createGui()
 
         for _, child in ipairs(tabs:GetChildren()) do
             if child:IsA("TextButton") then
-                child.BackgroundColor3 = child.Name == name and Color3.fromRGB(69, 104, 255) or Color3.fromRGB(24, 30, 40)
+                child.BackgroundColor3 = child.Name == name and Color3.fromRGB(75, 116, 255) or Color3.fromRGB(24, 30, 40)
             end
         end
     end
@@ -434,7 +429,7 @@ local function createGui()
         local tab = Instance.new("TextButton")
         tab.Name = name
         tab.Size = UDim2.new(0, isMobile and 88 or 96, 0, 32)
-        tab.BackgroundColor3 = name == "Overview" and Color3.fromRGB(69, 104, 255) or Color3.fromRGB(24, 30, 40)
+        tab.BackgroundColor3 = name == "Overview" and Color3.fromRGB(75, 116, 255) or Color3.fromRGB(24, 30, 40)
         tab.Text = name
         tab.TextColor3 = Color3.fromRGB(255, 255, 255)
         tab.Font = Enum.Font.GothamBold
@@ -464,53 +459,51 @@ local function createGui()
         local serverAvailable = getServerSnapshot() ~= nil
 
         if #snapshot == 0 then
-            createCard(overviewFrame, "No players found", "The client is not exposing players yet.", { "Try again after the round starts." }, Color3.fromRGB(130, 220, 255))
-            createCard(playersFrame, "Nothing to show", "No player data is visible yet.", { "If the game hides role values, this viewer cannot invent them." }, Color3.fromRGB(130, 220, 255))
-            createCard(chatsFrame, "Chat feed", serverAvailable and "Server helper available." or "Client-only chat capture active.", { "Chat messages will appear here as they arrive." }, Color3.fromRGB(130, 220, 255))
+            createCard(overviewFrame, "No players found", "The game is not exposing players to the client yet.", { "Try again after the round starts." }, Color3.fromRGB(130, 220, 255))
+            createCard(playersFrame, "Nothing to show", "No role data is visible yet.", { "This viewer only reads what the client can see." }, Color3.fromRGB(130, 220, 255))
+            createCard(chatsFrame, "Chat feed", serverAvailable and "Server helper available." or "Live chat capture is active.", { "Messages will appear here as they arrive." }, Color3.fromRGB(130, 220, 255))
             return
         end
 
-        createCard(overviewFrame, "Overview", "What this viewer can read", {
-            "Client scan mode: active",
-            "Server helper: " .. (serverAvailable and "available" or "not required"),
+        createCard(overviewFrame, "Overview", "Fresh Flicker-style viewer", {
+            "Role scan: active",
+            "Server helper: " .. (serverAvailable and "available" or "optional"),
             "Chat capture: live",
-            "Tip: if values are hidden, the viewer shows a safe empty state instead of fake data.",
+            "Role name colors: detective/savior = blue, murderer/evil = red, clown = grey"
         }, Color3.fromRGB(130, 220, 255))
 
         for _, entry in ipairs(snapshot) do
             local player = entry.player
-            local clientLines = summarize(entry.clientRoles)
-            local serverLines = summarize(entry.serverRoles)
-            local journalLines = summarize(entry.serverJournals)
+            local clientLines = summarize(entry.clientHints)
+            local serverLines = summarize(entry.serverHints)
+            local journalLines = summarize(entry.journalHints)
+            local accent = roleAccent(player.DisplayName .. " " .. player.Name)
+            local fallback = roleAccent(table.concat(clientLines, " "))
+            if fallback ~= nil then
+                accent = fallback
+            end
 
             if #clientLines == 0 and #serverLines == 0 and #journalLines == 0 then
                 clientLines = { "No obvious role, rank, faction, or journal values were found in this session." }
             end
 
-            local accent = Color3.fromRGB(127, 210, 255)
-            local text = string.lower(tostring(player.DisplayName) .. " " .. tostring(player.Name))
-            if string.find(text, "evil", 1, true) then
-                accent = Color3.fromRGB(255, 120, 120)
-            elseif string.find(text, "good", 1, true) then
-                accent = Color3.fromRGB(120, 255, 150)
-            end
-
-            createCard(playersFrame, player.Name, player.DisplayName .. " | Team: " .. tostring(player.Team and player.Team.Name or "None"), clientLines, accent)
+            createCard(playersFrame, player.Name, tostring(player.DisplayName) .. " | Team: " .. tostring(player.Team and player.Team.Name or "None"), clientLines, accent)
 
             if #serverLines > 0 then
                 createCard(playersFrame, player.Name .. " (server)", "Extra server snapshot values", serverLines, accent)
             end
+
             if #journalLines > 0 then
                 createCard(playersFrame, player.Name .. " (journals)", "Journal-like values", journalLines, accent)
             end
         end
 
-        if #chatHistory > 0 then
-            for _, item in ipairs(chatHistory) do
-                createCard(chatsFrame, item.speaker, item.channel .. " • " .. os.date("!%H:%M", item.time), { item.text }, Color3.fromRGB(130, 220, 255))
+        if #ChatHistory > 0 then
+            for _, item in ipairs(ChatHistory) do
+                createCard(chatsFrame, item.speaker, item.channel .. " • " .. os.date("!%H:%M", item.time), { item.text }, roleAccent(item.speaker))
             end
         else
-            createCard(chatsFrame, "No chat yet", "Chat capture is active.", { "Messages will appear here when they arrive." }, Color3.fromRGB(130, 220, 255))
+            createCard(chatsFrame, "No chat yet", "Chat capture is active.", { "Messages will appear here as they arrive." }, Color3.fromRGB(130, 220, 255))
         end
 
         overviewFrame.CanvasSize = UDim2.new(0, 0, 0, overviewLayout.AbsoluteContentSize.Y + 10)
@@ -522,7 +515,7 @@ local function createGui()
     toggle.Name = "ToggleButton"
     toggle.Size = UDim2.new(0, isMobile and 150 or 148, 0, 44)
     toggle.Position = UDim2.new(1, -162, 1, -56)
-    toggle.BackgroundColor3 = Color3.fromRGB(69, 104, 255)
+    toggle.BackgroundColor3 = Color3.fromRGB(75, 116, 255)
     toggle.Text = "Open Viewer"
     toggle.TextColor3 = Color3.fromRGB(255, 255, 255)
     toggle.Font = Enum.Font.GothamBold
@@ -552,16 +545,16 @@ local function createGui()
     end
 
     Players.PlayerChatted:Connect(function(player, message)
-        if player and message and message ~= "" then
+        if player and message and tostring(message) ~= "" then
             pcall(function()
-                table.insert(chatHistory, 1, {
+                table.insert(ChatHistory, 1, {
                     speaker = player.DisplayName ~= "" and player.DisplayName or player.Name,
                     text = tostring(message),
                     channel = "Chat",
                     time = os.time(),
                 })
-                while #chatHistory > MAX_CHAT_HISTORY do
-                    table.remove(chatHistory)
+                while #ChatHistory > MAX_CHAT_HISTORY do
+                    table.remove(ChatHistory)
                 end
             end)
         end
