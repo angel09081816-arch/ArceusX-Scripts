@@ -1,12 +1,13 @@
--- Flicker Role Viewer (rebuild)
--- Fully client-side, mobile-friendly, and no Studio setup required.
+-- Flicker Role Viewer
+-- Mobile-friendly client viewer with a guaranteed floating toggle.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
 
-local LocalPlayer = Players.LocalPlayer or Players:WaitForChild("LocalPlayer")
+local LocalPlayer = Players.LocalPlayer or Players:WaitForChild("LocalPlayer", 30)
 local chatHistory = {}
 local MAX_CHAT_HISTORY = 150
 
@@ -152,6 +153,7 @@ local function getServerSnapshot()
     if ok and type(result) == "table" and type(result.players) == "table" then
         return result
     end
+
     return nil
 end
 
@@ -188,9 +190,9 @@ end
 
 local function createCard(parent, title, subtitle, lines, accentColor)
     local card = Instance.new("Frame")
-    card.Size = UDim2.new(1, -12, 0, 0)
+    card.Size = UDim2.new(1, -10, 0, 0)
     card.AutomaticSize = Enum.AutomaticSize.Y
-    card.BackgroundColor3 = Color3.fromRGB(17, 22, 30)
+    card.BackgroundColor3 = Color3.fromRGB(16, 21, 29)
     card.BorderSizePixel = 0
     card.Parent = parent
 
@@ -205,33 +207,34 @@ local function createCard(parent, title, subtitle, lines, accentColor)
     pad.PaddingBottom = UDim.new(0, 10)
     pad.Parent = card
 
-    local t1 = Instance.new("TextLabel")
-    t1.Size = UDim2.new(1, 0, 0, 18)
-    t1.BackgroundTransparency = 1
-    t1.Text = title
-    t1.TextColor3 = accentColor or Color3.fromRGB(255, 255, 255)
-    t1.TextXAlignment = Enum.TextXAlignment.Left
-    t1.Font = Enum.Font.GothamBold
-    t1.TextSize = 13
-    t1.Parent = card
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, 0, 0, 18)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = title
+    titleLabel.TextColor3 = accentColor or Color3.fromRGB(255, 255, 255)
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 13
+    titleLabel.Parent = card
 
-    local t2 = Instance.new("TextLabel")
-    t2.Size = UDim2.new(1, 0, 0, 16)
-    t2.Position = UDim2.new(0, 0, 0, 19)
-    t2.BackgroundTransparency = 1
-    t2.Text = subtitle
-    t2.TextColor3 = Color3.fromRGB(180, 188, 200)
-    t2.TextXAlignment = Enum.TextXAlignment.Left
-    t2.Font = Enum.Font.Gotham
-    t2.TextSize = 11
-    t2.Parent = card
+    local subtitleLabel = Instance.new("TextLabel")
+    subtitleLabel.Size = UDim2.new(1, 0, 0, 16)
+    subtitleLabel.Position = UDim2.new(0, 0, 0, 20)
+    subtitleLabel.BackgroundTransparency = 1
+    subtitleLabel.Text = subtitle
+    subtitleLabel.TextColor3 = Color3.fromRGB(183, 191, 204)
+    subtitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    subtitleLabel.Font = Enum.Font.Gotham
+    subtitleLabel.TextSize = 11
+    subtitleLabel.TextWrapped = true
+    subtitleLabel.Parent = card
 
     local body = Instance.new("TextLabel")
     body.Size = UDim2.new(1, 0, 0, 0)
-    body.Position = UDim2.new(0, 0, 0, 37)
+    body.Position = UDim2.new(0, 0, 0, 40)
     body.BackgroundTransparency = 1
     body.Text = table.concat(lines or {}, "\n")
-    body.TextColor3 = Color3.fromRGB(240, 245, 250)
+    body.TextColor3 = Color3.fromRGB(243, 247, 251)
     body.TextXAlignment = Enum.TextXAlignment.Left
     body.TextYAlignment = Enum.TextYAlignment.Top
     body.Font = Enum.Font.Code
@@ -250,6 +253,7 @@ local function recordChat(message)
 
     local speaker = message.Speaker and (message.Speaker.DisplayName or message.Speaker.Name) or "System"
     local channel = message.Channel and message.Channel.Name or "Chat"
+
     table.insert(chatHistory, 1, {
         speaker = speaker,
         text = tostring(message.Text),
@@ -262,26 +266,43 @@ local function recordChat(message)
     end
 end
 
+local function getGuiParent()
+    if LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui") then
+        return LocalPlayer.PlayerGui
+    end
+    return CoreGui
+end
+
 local function createGui()
-    if not LocalPlayer or not LocalPlayer:FindFirstChild("PlayerGui") then
+    if not LocalPlayer then
         return
     end
 
-    local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-    if playerGui:FindFirstChild("FlickerRoleViewer") then
-        playerGui.FlickerRoleViewer:Destroy()
+    local guiParent = getGuiParent()
+    if not guiParent then
+        return
+    end
+
+    local existing = guiParent:FindFirstChild("FlickerRoleViewer")
+    if existing then
+        existing:Destroy()
     end
 
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "FlickerRoleViewer"
     screenGui.ResetOnSpawn = false
     screenGui.IgnoreGuiInset = true
-    screenGui.Parent = playerGui
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.Parent = guiParent
+
+    local isMobile = UserInputService.TouchEnabled or (UserInputService.GetDeviceFamily and UserInputService:GetDeviceFamily() == Enum.DeviceFamily.Phone)
+    local mainSize = isMobile and UDim2.new(1, -12, 0, 420) or UDim2.new(0, 430, 0, 540)
+    local mainPosition = isMobile and UDim2.new(0, 6, 0, 6) or UDim2.new(0, 14, 0, 14)
 
     local main = Instance.new("Frame")
     main.Name = "Main"
-    main.Size = UDim2.new(0, 430, 0, 540)
-    main.Position = UDim2.new(0, 14, 0, 14)
+    main.Size = mainSize
+    main.Position = mainPosition
     main.BackgroundColor3 = Color3.fromRGB(7, 10, 16)
     main.BorderSizePixel = 0
     main.Parent = screenGui
@@ -303,19 +324,19 @@ local function createGui()
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
     title.TextXAlignment = Enum.TextXAlignment.Left
     title.Font = Enum.Font.GothamBold
-    title.TextSize = 17
+    title.TextSize = isMobile and 15 or 17
     title.Parent = header
 
     local subtitle = Instance.new("TextLabel")
-    subtitle.Size = UDim2.new(1, -28, 0, 40)
+    subtitle.Size = UDim2.new(1, -28, 0, 42)
     subtitle.Position = UDim2.new(0, 14, 0, 36)
     subtitle.BackgroundTransparency = 1
-    subtitle.Text = "No Studio script needed. This viewer scans what the client can see and captures live chat in one place."
+    subtitle.Text = "Client-side role scan + live chat. Tap the blue button to open or hide this panel."
     subtitle.TextColor3 = Color3.fromRGB(185, 193, 206)
     subtitle.TextXAlignment = Enum.TextXAlignment.Left
     subtitle.TextWrapped = true
     subtitle.Font = Enum.Font.Gotham
-    subtitle.TextSize = 11
+    subtitle.TextSize = isMobile and 10 or 11
     subtitle.Parent = header
 
     local closeButton = Instance.new("TextButton")
@@ -333,20 +354,20 @@ local function createGui()
     closeCorner.Parent = closeButton
 
     local tabs = Instance.new("Frame")
-    tabs.Size = UDim2.new(1, -14, 0, 38)
+    tabs.Size = UDim2.new(1, -14, 0, 40)
     tabs.Position = UDim2.new(0, 7, 0, 80)
     tabs.BackgroundTransparency = 1
     tabs.Parent = main
 
     local tabLayout = Instance.new("UIGridLayout")
     tabLayout.CellPadding = UDim2.new(0, 6, 0, 6)
-    tabLayout.CellSize = UDim2.new(0, 96, 0, 32)
+    tabLayout.CellSize = isMobile and UDim2.new(0, 88, 0, 32) or UDim2.new(0, 96, 0, 32)
     tabLayout.StartCorner = Enum.StartCorner.TopLeft
     tabLayout.Parent = tabs
 
     local content = Instance.new("Frame")
-    content.Size = UDim2.new(1, -14, 1, -128)
-    content.Position = UDim2.new(0, 7, 0, 120)
+    content.Size = UDim2.new(1, -14, 1, -130)
+    content.Position = UDim2.new(0, 7, 0, 122)
     content.BackgroundTransparency = 1
     content.Parent = main
 
@@ -386,7 +407,10 @@ local function createGui()
     chatsLayout.Parent = chatsFrame
 
     local function clearFrame(frame)
-        if not frame then return end
+        if not frame then
+            return
+        end
+
         for _, child in ipairs(frame:GetChildren()) do
             if child ~= frame:FindFirstChildOfClass("UIListLayout") then
                 child:Destroy()
@@ -409,7 +433,7 @@ local function createGui()
     local function makeTab(name)
         local tab = Instance.new("TextButton")
         tab.Name = name
-        tab.Size = UDim2.new(0, 96, 0, 32)
+        tab.Size = UDim2.new(0, isMobile and 88 or 96, 0, 32)
         tab.BackgroundColor3 = name == "Overview" and Color3.fromRGB(69, 104, 255) or Color3.fromRGB(24, 30, 40)
         tab.Text = name
         tab.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -450,7 +474,7 @@ local function createGui()
             "Client scan mode: active",
             "Server helper: " .. (serverAvailable and "available" or "not required"),
             "Chat capture: live",
-            "Tip: if values are hidden, the viewer shows a safe empty state instead of fake numbers.",
+            "Tip: if values are hidden, the viewer shows a safe empty state instead of fake data.",
         }, Color3.fromRGB(130, 220, 255))
 
         for _, entry in ipairs(snapshot) do
@@ -496,13 +520,13 @@ local function createGui()
 
     local toggle = Instance.new("TextButton")
     toggle.Name = "ToggleButton"
-    toggle.Size = UDim2.new(0, 132, 0, 44)
-    toggle.Position = UDim2.new(1, -144, 1, -52)
+    toggle.Size = UDim2.new(0, isMobile and 150 or 148, 0, 44)
+    toggle.Position = UDim2.new(1, -162, 1, -56)
     toggle.BackgroundColor3 = Color3.fromRGB(69, 104, 255)
     toggle.Text = "Open Viewer"
     toggle.TextColor3 = Color3.fromRGB(255, 255, 255)
     toggle.Font = Enum.Font.GothamBold
-    toggle.TextSize = 12
+    toggle.TextSize = isMobile and 12 or 13
     toggle.AutoButtonColor = true
     toggle.Parent = screenGui
 
@@ -516,6 +540,9 @@ local function createGui()
 
     toggle.MouseButton1Click:Connect(function()
         main.Visible = not main.Visible
+        if main.Visible then
+            refreshView()
+        end
     end)
 
     if TextChatService and typeof(TextChatService.OnIncomingMessage) == "RBXScriptSignal" then
@@ -550,7 +577,7 @@ local function createGui()
 end
 
 pcall(function()
-    if LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui") then
+    if LocalPlayer then
         createGui()
     end
 end)
