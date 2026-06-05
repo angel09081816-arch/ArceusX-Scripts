@@ -1,152 +1,110 @@
--- Flicker Role Viewer server helper
--- Place this in ServerScriptService.
--- It exposes a safe snapshot of role / journal-like values to the client.
+-- Optional server helper for the clean viewer.
+-- Place this in ServerScriptService if you want a richer snapshot.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local function normalizeValue(value)
+local function isRoleKeyword(name)
+    local lower = string.lower(name or "")
+    return string.find(lower, "role", 1, true)
+        or string.find(lower, "rank", 1, true)
+        or string.find(lower, "team", 1, true)
+        or string.find(lower, "faction", 1, true)
+        or string.find(lower, "title", 1, true)
+        or string.find(lower, "group", 1, true)
+        or string.find(lower, "perm", 1, true)
+        or string.find(lower, "access", 1, true)
+        or string.find(lower, "journal", 1, true)
+        or string.find(lower, "diary", 1, true)
+        or string.find(lower, "notes", 1, true)
+end
+
+local function normalizeText(value)
     if value == nil then
         return ""
     end
 
-    local valueType = typeof(value)
-    if valueType == "Instance" then
+    local t = typeof(value)
+    if t == "Instance" then
         if value:IsA("StringValue") or value:IsA("IntValue") or value:IsA("NumberValue") or value:IsA("BoolValue") then
             return tostring(value.Value)
-        end
-        if value:IsA("Folder") or value:IsA("Model") then
-            return value.Name
         end
         return value.Name
     end
 
-    if valueType == "string" or valueType == "number" or valueType == "boolean" then
+    if t == "string" or t == "number" or t == "boolean" then
         return tostring(value)
     end
 
     return tostring(value)
 end
 
-local function isRoleLikeName(name)
-    local lower = string.lower(name or "")
-    return string.find(lower, "role")
-        or string.find(lower, "rank")
-        or string.find(lower, "team")
-        or string.find(lower, "faction")
-        or string.find(lower, "title")
-        or string.find(lower, "perm")
-        or string.find(lower, "access")
-        or string.find(lower, "group")
-        or string.find(lower, "journal")
-        or string.find(lower, "diary")
-        or string.find(lower, "notes")
-        or string.find(lower, "log")
-        or string.find(lower, "entry")
-        or string.find(lower, "memo")
-        or string.find(lower, "evidence")
-end
-
-local function isJournalLikeName(name)
-    local lower = string.lower(name or "")
-    return string.find(lower, "journal")
-        or string.find(lower, "diary")
-        or string.find(lower, "notes")
-        or string.find(lower, "entry")
-        or string.find(lower, "memo")
-        or string.find(lower, "log")
-        or string.find(lower, "evidence")
-end
-
-local function classifyName(name)
-    local lower = string.lower(name or "")
-    if string.find(lower, "journal") or string.find(lower, "diary") or string.find(lower, "notes") then
-        return "journal"
-    end
-    return "role"
-end
-
-local function addEntry(list, category, name, value)
-    if value == nil then
-        return
-    end
-
-    local text = normalizeValue(value)
+local function addEntry(list, name, value)
+    local text = normalizeText(value)
     if text ~= "" then
-        table.insert(list, { name = name, value = text, category = category })
+        table.insert(list, { name = name, value = text })
     end
 end
 
-local function collectServerEntries(player)
+local function collectSnapshot(player)
     local roles = {}
     local journals = {}
 
     for _, child in ipairs(player:GetChildren()) do
-        if child:IsA("Folder") or child:IsA("Model") or child:IsA("ValueBase") then
-            if isRoleLikeName(child.Name) then
-                if isJournalLikeName(child.Name) then
-                    addEntry(journals, "journal", child.Name, child)
-                else
-                    addEntry(roles, "role", child.Name, child)
-                end
+        if isRoleKeyword(child.Name) then
+            if string.find(string.lower(child.Name), "journal", 1, true) or string.find(string.lower(child.Name), "diary", 1, true) or string.find(string.lower(child.Name), "notes", 1, true) then
+                addEntry(journals, child.Name, child)
+            else
+                addEntry(roles, child.Name, child)
             end
         end
     end
 
-    for _, descendant in ipairs(player:GetDescendants()) do
-        if descendant:IsA("ValueBase") or descendant:IsA("Folder") or descendant:IsA("Model") then
-            if isRoleLikeName(descendant.Name) then
-                if isJournalLikeName(descendant.Name) then
-                    addEntry(journals, "journal", descendant.Name, descendant)
-                else
-                    addEntry(roles, "role", descendant.Name, descendant)
-                end
+    for _, desc in ipairs(player:GetDescendants()) do
+        if isRoleKeyword(desc.Name) then
+            if string.find(string.lower(desc.Name), "journal", 1, true) or string.find(string.lower(desc.Name), "diary", 1, true) or string.find(string.lower(desc.Name), "notes", 1, true) then
+                addEntry(journals, desc.Name, desc)
+            else
+                addEntry(roles, desc.Name, desc)
             end
         end
     end
 
     for key, value in pairs(player:GetAttributes()) do
-        if isRoleLikeName(key) then
-            addEntry(roles, "role", "Attribute:" .. key, value)
+        if isRoleKeyword(key) then
+            addEntry(roles, "Attribute:" .. key, value)
         end
     end
 
     if player.Team then
-        addEntry(roles, "role", "Team", player.Team.Name)
+        addEntry(roles, "Team", player.Team.Name)
     end
 
     local leaderstats = player:FindFirstChild("leaderstats")
     if leaderstats then
         for _, stat in ipairs(leaderstats:GetChildren()) do
-            if isRoleLikeName(stat.Name) then
-                if isJournalLikeName(stat.Name) then
-                    addEntry(journals, "journal", stat.Name, stat.Value)
+            if isRoleKeyword(stat.Name) then
+                local lower = string.lower(stat.Name)
+                if string.find(lower, "journal", 1, true) or string.find(lower, "diary", 1, true) or string.find(lower, "notes", 1, true) then
+                    addEntry(journals, stat.Name, stat.Value)
                 else
-                    addEntry(roles, "role", stat.Name, stat.Value)
+                    addEntry(roles, stat.Name, stat.Value)
                 end
             end
         end
     end
 
-    return {
-        roles = roles,
-        journals = journals,
-    }
+    return { roles = roles, journals = journals }
 end
 
-local function ensureRemoteFunction()
-    local existing = ReplicatedStorage:FindFirstChild("FlickerRoleViewerRemote")
-    if existing then
-        existing:Destroy()
-    end
-
-    local remote = Instance.new("RemoteFunction")
-    remote.Name = "FlickerRoleViewerRemote"
-    remote.Parent = ReplicatedStorage
-    return remote
+local existing = ReplicatedStorage:FindFirstChild("FlickerRoleViewerRemote")
+if existing then
+    existing:Destroy()
 end
 
-local remote = ensureRemoteFunction()
+local remote = Instance.new("RemoteFunction")
+remote.Name = "FlickerRoleViewerRemote"
+remote.Parent = ReplicatedStorage
 
 remote.OnServerInvoke = function(player, action)
     if action ~= "GetRoleData" then
@@ -155,8 +113,7 @@ remote.OnServerInvoke = function(player, action)
 
     local snapshot = { players = {} }
     for _, other in ipairs(Players:GetPlayers()) do
-        snapshot.players[tostring(other.UserId)] = collectServerEntries(other)
+        snapshot.players[tostring(other.UserId)] = collectSnapshot(other)
     end
-
     return snapshot
 end
