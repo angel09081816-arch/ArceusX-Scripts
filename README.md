@@ -23,7 +23,7 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/angel09081816-arch/Ar
 2. Open the script executor tab.
 3. Paste the loadstring above.
 4. Execute it.
-5. A polished viewer will appear with tabs for Roles, Journals, and Summary, plus a draggable window and scrollable cards.
+5. A polished viewer will appear with dedicated tabs for Roles, Journals, and Summary, plus a draggable window, a reliable Open Viewer button, and scrollable cards.
 
 ## Optional server helper
 For richer server-readable data, place the file `Flicker_Role_Viewer_Server.lua` into `ServerScriptService` in Roblox Studio.

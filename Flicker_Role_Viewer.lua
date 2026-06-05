@@ -309,38 +309,6 @@ local function createGui()
     local tabs = {}
     local activeTab = "Roles"
 
-    local function createTab(name)
-        local tab = Instance.new("TextButton")
-        tab.Size = UDim2.new(0, 110, 0, 32)
-        tab.BackgroundColor3 = name == activeTab and Color3.fromRGB(72, 107, 255) or Color3.fromRGB(25, 30, 40)
-        tab.Text = name
-        tab.TextColor3 = Color3.fromRGB(255, 255, 255)
-        tab.Font = Enum.Font.GothamBold
-        tab.TextSize = 12
-        tab.AutoButtonColor = true
-        tab.Parent = tabBar
-
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0, 10)
-        corner.Parent = tab
-
-        tab.MouseButton1Click:Connect(function()
-            activeTab = name
-            for _, other in ipairs(tabs) do
-                other.Button.BackgroundColor3 = other.Name == activeTab and Color3.fromRGB(72, 107, 255) or Color3.fromRGB(25, 30, 40)
-            end
-            rolesFrame.Visible = activeTab == "Roles"
-            journalsFrame.Visible = activeTab == "Journals"
-            summaryFrame.Visible = activeTab == "Summary"
-        end)
-
-        return { Name = name, Button = tab }
-    end
-
-    table.insert(tabs, createTab("Roles"))
-    table.insert(tabs, createTab("Journals"))
-    table.insert(tabs, createTab("Summary"))
-
     local content = Instance.new("Frame")
     content.Size = UDim2.new(1, -18, 1, -122)
     content.Position = UDim2.new(0, 9, 0, 112)
@@ -390,6 +358,50 @@ local function createGui()
     summaryLayout.Padding = UDim.new(0, 8)
     summaryLayout.SortOrder = Enum.SortOrder.LayoutOrder
     summaryLayout.Parent = summaryFrame
+
+    local function setActiveTab(name)
+        activeTab = name
+        for _, other in ipairs(tabs) do
+            other.Button.BackgroundColor3 = other.Name == activeTab and Color3.fromRGB(72, 107, 255) or Color3.fromRGB(25, 30, 40)
+        end
+
+        if rolesFrame then
+            rolesFrame.Visible = activeTab == "Roles"
+        end
+        if journalsFrame then
+            journalsFrame.Visible = activeTab == "Journals"
+        end
+        if summaryFrame then
+            summaryFrame.Visible = activeTab == "Summary"
+        end
+    end
+
+    local function createTab(name)
+        local tab = Instance.new("TextButton")
+        tab.Size = UDim2.new(0, 110, 0, 32)
+        tab.BackgroundColor3 = name == activeTab and Color3.fromRGB(72, 107, 255) or Color3.fromRGB(25, 30, 40)
+        tab.Text = name
+        tab.TextColor3 = Color3.fromRGB(255, 255, 255)
+        tab.Font = Enum.Font.GothamBold
+        tab.TextSize = 12
+        tab.AutoButtonColor = true
+        tab.Parent = tabBar
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 10)
+        corner.Parent = tab
+
+        tab.MouseButton1Click:Connect(function()
+            setActiveTab(name)
+        end)
+
+        return { Name = name, Button = tab }
+    end
+
+    table.insert(tabs, createTab("Roles"))
+    table.insert(tabs, createTab("Journals"))
+    table.insert(tabs, createTab("Summary"))
+    setActiveTab("Roles")
 
     local function clearFrame(frame)
         for _, child in ipairs(frame:GetChildren()) do
@@ -488,11 +500,14 @@ local function createGui()
     toggleCorner.Parent = toggleButton
 
     local dragData = {}
+    local dragMoved = false
+
     toggleButton.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragData.toggle = true
             dragData.startPos = input.Position
             dragData.startButtonPos = toggleButton.Position
+            dragMoved = false
         end
     end)
 
@@ -501,18 +516,17 @@ local function createGui()
             dragData.main = true
             dragData.startPos = input.Position
             dragData.startMainPos = main.Position
-        end
-    end)
-
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragData = {}
+            dragMoved = false
         end
     end)
 
     UserInputService.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 and dragData.startPos then
             local delta = input.Position - dragData.startPos
+            if math.abs(delta.X) > 1 or math.abs(delta.Y) > 1 then
+                dragMoved = true
+            end
+
             if dragData.toggle then
                 toggleButton.Position = UDim2.new(dragData.startButtonPos.X.Scale, dragData.startButtonPos.X.Offset + delta.X, dragData.startButtonPos.Y.Scale, dragData.startButtonPos.Y.Offset + delta.Y)
             end
@@ -522,10 +536,19 @@ local function createGui()
         end
     end)
 
-    toggleButton.MouseButton1Click:Connect(function()
-        if not (dragData.toggle and dragData.startPos) then
-            setMenuVisible(not main.Visible)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragData = {}
         end
+    end)
+
+    toggleButton.MouseButton1Click:Connect(function()
+        if dragMoved then
+            dragMoved = false
+            return
+        end
+
+        setMenuVisible(not main.Visible)
     end)
 
     local refreshButton = Instance.new("TextButton")
@@ -547,7 +570,7 @@ local function createGui()
 
     refreshView()
     task.spawn(function()
-        while main.Parent do
+        while screenGui.Parent and main.Parent do
             task.wait(1)
             refreshView()
         end
